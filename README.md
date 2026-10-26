@@ -290,7 +290,7 @@ python -m pytest tests/ -v
 
 # Project structure
 src/renderdoc_mcp/
-├── server.py                 # FastMCP server, 3 prompt definitions
+├── server.py                 # MCPServer (mcp 2.x), 3 prompt definitions
 ├── session.py                # Capture lifecycle, resource/texture caches (singleton)
 ├── util.py                   # Serialization, enum maps, blend formula, module loader
 └── tools/

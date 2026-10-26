@@ -1,11 +1,13 @@
-"""FastMCP server — registers all tools, resources, and prompts."""
+"""MCP server (mcp 2.x MCPServer) — registers all tools, resources, and prompts."""
 
 from __future__ import annotations
 
 import atexit
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
+from renderdoc_mcp.replay_thread import get_replay_thread, on_replay_thread
 from renderdoc_mcp.session import get_session
 from renderdoc_mcp.tools import (
     session_tools,
@@ -19,9 +21,36 @@ from renderdoc_mcp.tools import (
     diagnostic_tools,
 )
 
-mcp = FastMCP(
+class RenderDocMCPServer(MCPServer):
+    """MCPServer whose tools all execute on the single RenderDoc replay thread.
+
+    mcp 2.x would otherwise run each sync tool on an arbitrary worker thread,
+    concurrently with others, which RenderDoc's ReplayController does not allow.
+    The decorator still returns the original function, so tools can keep
+    calling each other directly.
+    """
+
+    def tool(self, *args, **kwargs):
+        register_tool = super().tool(*args, **kwargs)
+
+        def decorator(fn):
+            register_tool(on_replay_thread(fn))
+            return fn
+
+        return decorator
+
+
+def _server_version() -> str:
+    try:
+        return _pkg_version("renderdoc-mcp")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
+mcp = RenderDocMCPServer(
     "renderdoc-mcp",
     instructions="RenderDoc graphics debugger MCP server — analyze GPU frame captures (.rdc) with AI",
+    version=_server_version(),
 )
 
 # ── Register all tool modules ──
@@ -113,7 +142,13 @@ def analyze_performance() -> str:
 # ── Cleanup ──
 
 def _cleanup():
-    get_session().shutdown()
+    # RenderDoc must be shut down on the same thread that used it.
+    replay = get_replay_thread()
+    try:
+        if replay.is_alive:
+            replay.submit(get_session().shutdown).result(timeout=30)
+    except Exception:
+        pass
 
 atexit.register(_cleanup)
 
